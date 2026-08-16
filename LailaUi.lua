@@ -1,5 +1,5 @@
 -- ═══════════════════════════════════════════════════════════════
--- MODERN HUD — Fixed Edition v2
+-- MODERN HUD — Fixed Edition v3 (unified type system)
 -- Coexists with default Roblox UI. No top bar. No CoreGui tampering.
 -- "/" opens this HUD's own chatbox. "/w <player> <message>" whispers.
 -- ═══════════════════════════════════════════════════════════════
@@ -46,21 +46,17 @@ end)
 -- for "/" and Enter, and its own whisper handling lived in ITS box —
 -- not ours. Two chat systems fighting for the same keys is exactly what
 -- produced the stray "/" behavior and the "whisper doesn't work" symptom.
--- These three lines are the actual fix for that:
+-- These two lines are the actual fix for that:
 pcall(function() TextChatService.ChatWindowConfiguration.Enabled = false end)
 pcall(function() TextChatService.ChatInputBarConfiguration.Enabled = false end)
 -- Custom bubble chat enabled below
 
 -- ─── ENABLE THE REAL "VIEW PROFILE" API ───
 -- FIXED (the actual bug behind the "Profile Unavailable Here" toast):
--- "PromptViewProfile" was never a real, registered SetCore key — it's not
--- in Roblox's SetCore list anywhere, so that call always failed and always
--- fell into the warning-toast fallback branch, 100% of the time, for
--- everyone. The real, documented API for showing a player's profile from
--- inside an experience is the Avatar Context Menu (ACM): it has to be
--- switched on once here, then opened per-target later (see
--- APProfileBtn's click handler further down). ACM's default "View" option
--- is the actual native profile/appearance inspector.
+-- "PromptViewProfile" was never a real, registered SetCore key. The real,
+-- documented API for showing a player's profile from inside an experience
+-- is the Avatar Context Menu (ACM): switched on once here, then opened
+-- per-target later (see APProfileBtn's click handler further down).
 pcall(function()
 	StarterGui:SetCore("AvatarContextMenuEnabled", true)
 end)
@@ -70,21 +66,25 @@ local Config = {
 	ToggleKey = Enum.KeyCode.Tab,
 	SettingsKey = Enum.KeyCode.Comma,
 	Theme = {
-		Background = Color3.fromRGB(10, 10, 16),
-		Panel = Color3.fromRGB(20, 20, 32),
-		Surface = Color3.fromRGB(32, 34, 50),
-		SurfaceHover = Color3.fromRGB(45, 47, 68),
-		Accent = Color3.fromRGB(108, 140, 255),
-		AccentDeep = Color3.fromRGB(130, 90, 255), -- gradient partner for Accent, used on headers/buttons
-		Success = Color3.fromRGB(82, 210, 128),
-		Warning = Color3.fromRGB(255, 188, 82),
-		Error = Color3.fromRGB(255, 86, 86),
-		Info = Color3.fromRGB(86, 160, 255),
-		TextPrimary = Color3.fromRGB(250, 250, 254),
-		TextSecondary = Color3.fromRGB(178, 178, 200),
-		TextMuted = Color3.fromRGB(112, 114, 138),
-		Border = Color3.fromRGB(40, 42, 60),
-		BorderLight = Color3.fromRGB(64, 66, 90),
+		-- Near-black with a faint blue-violet tint instead of flat neutral
+		-- grey — this is what actually reads as "designed" rather than a
+		-- default dark-mode template.
+		Background = Color3.fromRGB(7, 7, 12),
+		Panel = Color3.fromRGB(16, 15, 26),
+		PanelDeep = Color3.fromRGB(10, 9, 18),
+		Surface = Color3.fromRGB(24, 23, 38),
+		SurfaceHover = Color3.fromRGB(36, 34, 56),
+		Accent = Color3.fromRGB(132, 108, 255),
+		AccentDeep = Color3.fromRGB(255, 92, 170),
+		Success = Color3.fromRGB(76, 222, 140),
+		Warning = Color3.fromRGB(255, 176, 64),
+		Error = Color3.fromRGB(255, 82, 110),
+		Info = Color3.fromRGB(98, 166, 255),
+		TextPrimary = Color3.fromRGB(252, 252, 255),
+		TextSecondary = Color3.fromRGB(172, 170, 196),
+		TextMuted = Color3.fromRGB(104, 102, 130),
+		Border = Color3.fromRGB(34, 32, 52),
+		BorderLight = Color3.fromRGB(56, 53, 82),
 	},
 	Chat = { MaxMessages = 100, ShowTimestamps = SavedSettings.ShowTimestamps ~= false, Position = SavedSettings.ChatPosition or {X = 15, Y = 52} },
 	PlayerList = { ShowPing = true, ShowTeam = true, EntryHeight = 52 },
@@ -93,6 +93,39 @@ local Config = {
 	MasterVolume = SavedSettings.MasterVolume or 100,
 	KeyBinds = SavedSettings.KeyBinds or {PlayerList = "Tab", Settings = "Comma", Chat = "Slash"},
 }
+
+-- ─── TYPE SYSTEM ───
+-- ONE family (Gotham) pulled at different weights, instead of the old
+-- Michroma / Gotham / BuilderSans grab-bag. Same letterforms everywhere
+-- -> the whole HUD reads as one designed app instead of three stitched-
+-- together UI kits. Hierarchy comes from weight + size.
+--
+-- NOTE: deliberately using legacy Enum.Font here, not Font.new() with a
+-- custom FontFace. Font.new relies on the newer `Font` datatype, which
+-- isn't implemented (or is only partially implemented) on a lot of
+-- executors — if it's missing, Font.new throws at the very top of the
+-- script, before any GUI element gets created, and the whole HUD fails
+-- silently. Enum.Font is the old, universally-supported API.
+local Fonts = {
+	Regular  = Enum.Font.Gotham,
+	Medium   = Enum.Font.GothamMedium,
+	SemiBold = Enum.Font.GothamBold, -- Gotham has no true semibold step
+	Bold     = Enum.Font.GothamBold,
+	Heavy    = Enum.Font.GothamBlack, -- panel headers only
+}
+
+-- Fakes letter-tracking for uppercase headers (thin-space between chars).
+-- Michroma used to give headers built-in wide spacing for free; Heavy-
+-- weight BuilderSans doesn't, so this recovers that "designed header"
+-- feel without pulling in a second type family.
+local THIN_SPACE = "\226\128\137" -- U+2009
+local function Tracked(str)
+	local out = {}
+	for i = 1, #str do
+		out[i] = str:sub(i, i)
+	end
+	return table.concat(out, THIN_SPACE)
+end
  
 -- ─── ANIMATION UTIL ───
 local Animation = {}
@@ -245,9 +278,6 @@ function UI.Corner(parent, r)
 	return c
 end
 
--- Diagonal accent gradient (Accent -> AccentDeep). Used sparingly on
--- headers, active states, and primary buttons to give the flat theme
--- some depth instead of everything being one solid slab of color.
 function UI.AccentGradient(parent, rotation)
 	local g = Instance.new("UIGradient")
 	g.Color = ColorSequence.new({
@@ -259,15 +289,13 @@ function UI.AccentGradient(parent, rotation)
 	return g
 end
 
--- Subtle vertical panel gradient (Panel -> Background) so big flat
--- frames read as slightly lit from the top rather than one flat fill.
 function UI.PanelGradient(parent, rotation)
 	local g = Instance.new("UIGradient")
 	g.Color = ColorSequence.new({
-		ColorSequenceKeypoint.new(0, Color3.new(1, 1, 1)),
-		ColorSequenceKeypoint.new(1, Color3.new(0.82, 0.82, 0.86)),
+		ColorSequenceKeypoint.new(0, Config.Theme.Panel),
+		ColorSequenceKeypoint.new(1, Config.Theme.PanelDeep),
 	})
-	g.Rotation = rotation or 90
+	g.Rotation = rotation or 100
 	g.Parent = parent
 	return g
 end
@@ -278,6 +306,16 @@ function UI.Stroke(parent, col, thick)
 	s.Thickness = thick or 1
 	s.Transparency = 0.3
 	s.Parent = parent
+	return s
+end
+
+function UI.GlowStroke(parent, thickness)
+	local s = Instance.new("UIStroke")
+	s.Color = Config.Theme.Accent
+	s.Thickness = thickness or 1.25
+	s.Transparency = 0.45
+	s.Parent = parent
+	UI.AccentGradient(s, 100)
 	return s
 end
  
@@ -298,39 +336,127 @@ function UI.Shadow(parent, off)
 	sh.Visible = Config.Shadows
 	return sh
 end
+
+-- Panel header helper: unified Heavy-weight, tracked-uppercase label +
+-- the accent-gradient underline strip, used identically for Players /
+-- Chat / Settings so all three headers now look like the same component
+-- instead of three separately hand-built ones.
+function UI.PanelHeader(parent, text, opts)
+	opts = opts or {}
+	-- FIXED: this used a fixed radius of 12 regardless of the panel it
+	-- sat inside, while PLFrame/ChatFrame round at 16 — two different
+	-- curves stacked on each other never line up, which is why the
+	-- header's rounded corner looked "unmatched" against the panel's
+	-- outer glow outline. Now takes the panel's own radius so they're
+	-- identical, and defaults to 16 (what every panel here actually uses).
+	local radius = opts.CornerRadius or 16
+	local header = Instance.new("Frame", parent)
+	header.Name = "Header"
+	header.Size = UDim2.new(1, 0, 0, opts.Height or 44)
+	header.BackgroundColor3 = Config.Theme.Panel
+	header.BackgroundTransparency = 0.3
+	header.BorderSizePixel = 0
+	UI.Corner(header, radius)
+
+	-- UICorner rounds all 4 corners, but the header's bottom corners
+	-- sit flush against the panel's straight side walls (not a real
+	-- outer corner) — left rounded, they'd pull away from the walls
+	-- and expose a curved sliver of background on each side. This
+	-- squares the bottom back off, same color/transparency as header,
+	-- so only the top two corners (the real outer corners) round.
+	local squareOff = Instance.new("Frame", header)
+	squareOff.Name = "SquareOff"
+	squareOff.BackgroundColor3 = header.BackgroundColor3
+	squareOff.BackgroundTransparency = header.BackgroundTransparency
+	squareOff.BorderSizePixel = 0
+	squareOff.Size = UDim2.new(1, 0, 0, radius)
+	squareOff.Position = UDim2.new(0, 0, 1, -radius)
+
+	local accent = Instance.new("Frame", header)
+	accent.Size = UDim2.new(1, 0, 0, 2)
+	accent.Position = UDim2.new(0, 0, 1, -2)
+	accent.BackgroundColor3 = Color3.new(1, 1, 1)
+	accent.BorderSizePixel = 0
+	UI.AccentGradient(accent, 0)
+
+	local title = Instance.new("TextLabel", header)
+	title.Size = UDim2.new(1, -(opts.RightPad or 40), 1, 0)
+	title.Position = UDim2.fromOffset(14, 0)
+	title.BackgroundTransparency = 1
+	title.Text = Tracked(text:upper())
+	title.TextColor3 = Config.Theme.TextPrimary
+	title.TextSize = opts.TextSize or 15
+	title.Font = Fonts.Heavy
+	title.TextXAlignment = Enum.TextXAlignment.Left
+
+	return header, title
+end
  
 function UI.CreateButton(props)
 	local button = Instance.new("TextButton")
 	button.Size = props.Size
 	button.Position = props.Position
-	button.BackgroundColor3 = Config.Theme.Surface
-	button.BackgroundTransparency = 0.2
 	button.Text = props.Text or ""
-	button.TextColor3 = Config.Theme.TextPrimary
 	button.TextSize = 15
-	button.Font = Enum.Font.GothamMedium
+	button.Font = Fonts.SemiBold
 	button.AutoButtonColor = false
 	button.BorderSizePixel = 0
 	button.Parent = props.Parent
  
 	UI.Corner(button, 8)
-	UI.Stroke(button)
+
+	local isPrimary = props.Primary
+	local shine
+
+	if isPrimary then
+		button.BackgroundColor3 = Color3.new(1, 1, 1)
+		button.TextColor3 = Color3.new(1, 1, 1)
+		UI.AccentGradient(button, 100)
+
+		shine = Instance.new("Frame", button)
+		shine.BackgroundColor3 = Color3.new(1, 1, 1)
+		shine.BackgroundTransparency = 1
+		shine.BorderSizePixel = 0
+		shine.Size = UDim2.fromScale(1, 1)
+		shine.ZIndex = button.ZIndex + 1
+		UI.Corner(shine, 8)
+	else
+		button.BackgroundColor3 = Config.Theme.Surface
+		button.BackgroundTransparency = 0.2
+		button.TextColor3 = Config.Theme.TextPrimary
+		UI.Stroke(button)
+	end
  
 	local conns = {}
 	table.insert(conns, button.MouseEnter:Connect(function()
-		Animation:Hover(button, true, Config.Theme.Surface)
+		if isPrimary then
+			Animation:Fade(shine, 0.88, 0.1)
+		else
+			Animation:Hover(button, true, Config.Theme.Surface)
+		end
 	end))
 	table.insert(conns, button.MouseLeave:Connect(function()
-		Animation:Hover(button, false, Config.Theme.Surface)
+		if isPrimary then
+			Animation:Fade(shine, 1, 0.1)
+		else
+			Animation:Hover(button, false, Config.Theme.Surface)
+		end
 	end))
 	table.insert(conns, button.MouseButton1Down:Connect(function()
-		local base = button.BackgroundColor3
-		Animation:_playTween(button, TweenInfo.new(0.04), {BackgroundColor3 = base:Lerp(Color3.new(0.35,0.35,0.45), 0.4)})
-		task.delay(0.06, function()
-			if button and button.Parent then
-				Animation:_playTween(button, TweenInfo.new(0.1), {BackgroundColor3 = base})
-			end
-		end)
+		if isPrimary then
+			Animation:Fade(shine, 0.75, 0.04)
+			task.delay(0.06, function()
+				if shine and shine.Parent then Animation:Fade(shine, 0.88, 0.1) end
+			end)
+		else
+			local base = button.BackgroundColor3
+			Animation:_playTween(button, TweenInfo.new(0.04), {BackgroundColor3 = base:Lerp(Color3.new(0.35,0.35,0.45), 0.4)})
+			task.delay(0.06, function()
+				if button and button.Parent then
+					Animation:_playTween(button, TweenInfo.new(0.1), {BackgroundColor3 = base})
+				end
+			end)
+		end
 	end))
  
 	if props.OnClick then
@@ -343,7 +469,11 @@ function UI.CreateButton(props)
 		Instance = button,
 		SetEnabled = function(_, enabled)
 			button.Active = enabled
-			button.TextColor3 = enabled and Config.Theme.TextPrimary or Config.Theme.TextMuted
+			if not isPrimary then
+				button.TextColor3 = enabled and Config.Theme.TextPrimary or Config.Theme.TextMuted
+			else
+				button.TextTransparency = enabled and 0 or 0.5
+			end
 		end,
 		SetText = function(_, text) button.Text = text end,
 		Destroy = function()
@@ -362,7 +492,7 @@ function UI.CreateLabel(props)
 	label.Text = props.Text
 	label.TextColor3 = Config.Theme.TextPrimary
 	label.TextSize = 14
-	label.Font = Enum.Font.Gotham
+	label.Font = Fonts.Regular
 	label.TextXAlignment = Enum.TextXAlignment.Left
 	label.Parent = props.Parent
 	return {
@@ -383,7 +513,7 @@ function UI.CreateToggle(props)
 	label.Text = props.Text
 	label.TextColor3 = Config.Theme.TextPrimary
 	label.TextSize = 14
-	label.Font = Enum.Font.Gotham
+	label.Font = Fonts.Regular
 	label.TextXAlignment = Enum.TextXAlignment.Left
  
 	local track = Instance.new("Frame", container)
@@ -449,7 +579,7 @@ function UI.CreateSlider(props)
 	label.Text = props.Text
 	label.TextColor3 = Config.Theme.TextPrimary
 	label.TextSize = 14
-	label.Font = Enum.Font.Gotham
+	label.Font = Fonts.Regular
 	label.TextXAlignment = Enum.TextXAlignment.Left
  
 	local valueLabel = Instance.new("TextLabel", container)
@@ -459,7 +589,7 @@ function UI.CreateSlider(props)
 	valueLabel.Text = tostring(props.DefaultValue)
 	valueLabel.TextColor3 = Config.Theme.TextSecondary
 	valueLabel.TextSize = 14
-	valueLabel.Font = Enum.Font.GothamMedium
+	valueLabel.Font = Fonts.Medium
 	valueLabel.TextXAlignment = Enum.TextXAlignment.Right
  
 	local track = Instance.new("Frame", container)
@@ -507,12 +637,6 @@ function UI.CreateSlider(props)
  
 	updateVisual()
  
-	-- FIXED: was UserInputService.InputBegan with an `if gp then return end`
-	-- guard. Once SetFrame.Active was turned on (to stop background clicks
-	-- closing the modal), every click inside the modal got marked as "game
-	-- processed", so that guard silently ate every slider click. Using the
-	-- container's own InputBegan instead isn't affected by that flag, and
-	-- it already only fires when the input actually lands on this container.
 	table.insert(conns, container.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			dragging = true
@@ -556,8 +680,6 @@ function UI.CreatePlayerEntry(props)
 	entry.Parent = props.Parent
 	UI.Corner(entry, 10)
 
-	-- Left accent strip, hidden until hover — gives clicking a row a
-	-- clearer "this is interactive" affordance than a flat color shift alone.
 	local accentStrip = Instance.new("Frame", entry)
 	accentStrip.Size = UDim2.new(0, 3, 1, -12)
 	accentStrip.Position = UDim2.new(0, 0, 0, 6)
@@ -569,10 +691,14 @@ function UI.CreatePlayerEntry(props)
  
 	local thumb = Instance.new("ImageLabel", entry)
 	thumb.Size = UDim2.fromOffset(34, 34)
-	thumb.Position = UDim2.fromOffset(8, 6)
+	thumb.Position = UDim2.fromOffset(10, 6)
 	thumb.BackgroundColor3 = Config.Theme.Background
 	thumb.BorderSizePixel = 0
 	UI.Corner(thumb, 17)
+	local thumbRing = Instance.new("UIStroke", thumb)
+	thumbRing.Color = Config.Theme.BorderLight
+	thumbRing.Thickness = 1.5
+	thumbRing.Transparency = 0.2
  
 	local name = Instance.new("TextLabel", entry)
 	name.Size = UDim2.new(0, 120, 0, 20)
@@ -580,7 +706,7 @@ function UI.CreatePlayerEntry(props)
 	name.BackgroundTransparency = 1
 	name.TextColor3 = Config.Theme.TextPrimary
 	name.TextSize = 14
-	name.Font = Enum.Font.GothamBold
+	name.Font = Fonts.Bold
 	name.TextXAlignment = Enum.TextXAlignment.Left
  
 	local user = Instance.new("TextLabel", entry)
@@ -589,7 +715,7 @@ function UI.CreatePlayerEntry(props)
 	user.BackgroundTransparency = 1
 	user.TextColor3 = Config.Theme.TextMuted
 	user.TextSize = 12
-	user.Font = Enum.Font.Gotham
+	user.Font = Fonts.Regular
 	user.TextXAlignment = Enum.TextXAlignment.Left
  
 	local statsF = Instance.new("Frame", entry)
@@ -635,7 +761,7 @@ function UI.CreatePlayerEntry(props)
 					l.Text = statName .. ": " .. tostring(v)
 					l.TextColor3 = Config.Theme.TextSecondary
 					l.TextSize = 12
-					l.Font = Enum.Font.GothamMedium
+					l.Font = Fonts.Medium
 					l.TextXAlignment = Enum.TextXAlignment.Right
 				end
 			elseif data.Team and Config.PlayerList.ShowTeam then
@@ -645,11 +771,9 @@ function UI.CreatePlayerEntry(props)
 				l.Text = data.Team.Name
 				l.TextColor3 = data.Team.TeamColor.Color
 				l.TextSize = 12
-				l.Font = Enum.Font.GothamBold
+				l.Font = Fonts.Bold
 				l.TextXAlignment = Enum.TextXAlignment.Right
 			end
- 
-
 		end,
 		Destroy = function()
 			for _, c in ipairs(conns) do c:Disconnect() end
@@ -665,44 +789,68 @@ function UI.CreateNotification(props)
 	local frame = Instance.new("Frame")
 	frame.Size = UDim2.new(0, 340, 0, 0)
 	frame.AutomaticSize = Enum.AutomaticSize.Y
-	frame.BackgroundColor3 = Config.Theme.Panel
+	frame.BackgroundColor3 = Color3.new(1, 1, 1)
 	frame.BackgroundTransparency = 0.05
 	frame.BorderSizePixel = 0
 	frame.Parent = props.Parent
-	UI.Corner(frame, 10)
-	UI.Stroke(frame, Config.Theme.BorderLight, 1)
+	UI.Corner(frame, 12)
+	UI.GlowStroke(frame, 1.25)
 	UI.Shadow(frame, 24)
+	UI.PanelGradient(frame, 100)
  
 	local accent = Instance.new("Frame", frame)
 	accent.Size = UDim2.new(0, 3, 1, 0)
 	accent.BorderSizePixel = 0
  
 	local colors = {Info = Config.Theme.Info, Success = Config.Theme.Success, Warning = Config.Theme.Warning, Error = Config.Theme.Error}
-	accent.BackgroundColor3 = colors[props.Type] or Config.Theme.Info
+	local glyphs = {Info = "I", Success = "OK", Warning = "!", Error = "X"}
+	local typeColor = colors[props.Type] or Config.Theme.Info
+	accent.BackgroundColor3 = typeColor
  
 	local pad = Instance.new("UIPadding", frame)
 	pad.PaddingLeft = UDim.new(0, 16)
 	pad.PaddingRight = UDim.new(0, 16)
-	pad.PaddingTop = UDim.new(0, 12)
-	pad.PaddingBottom = UDim.new(0, 12)
+	pad.PaddingTop = UDim.new(0, 14)
+	pad.PaddingBottom = UDim.new(0, 14)
+
+	local badge = Instance.new("Frame", frame)
+	badge.Size = UDim2.fromOffset(26, 26)
+	badge.Position = UDim2.fromOffset(0, 1)
+	badge.BackgroundColor3 = typeColor
+	badge.BackgroundTransparency = 0.78
+	badge.BorderSizePixel = 0
+	UI.Corner(badge, 13)
+	local badgeStroke = Instance.new("UIStroke", badge)
+	badgeStroke.Color = typeColor
+	badgeStroke.Thickness = 1
+	badgeStroke.Transparency = 0.4
+
+	local glyph = Instance.new("TextLabel", badge)
+	glyph.Size = UDim2.fromScale(1, 1)
+	glyph.BackgroundTransparency = 1
+	glyph.Text = glyphs[props.Type] or "i"
+	glyph.TextColor3 = typeColor
+	glyph.TextSize = 14
+	glyph.Font = Fonts.Bold
  
 	local title = Instance.new("TextLabel", frame)
-	title.Size = UDim2.new(1, -28, 0, 20)
+	title.Size = UDim2.new(1, -68, 0, 20)
+	title.Position = UDim2.fromOffset(34, 0)
 	title.BackgroundTransparency = 1
 	title.Text = props.Title
 	title.TextColor3 = Config.Theme.TextPrimary
 	title.TextSize = 15
-	title.Font = Enum.Font.GothamBold
+	title.Font = Fonts.Bold
 	title.TextXAlignment = Enum.TextXAlignment.Left
  
 	local desc = Instance.new("TextLabel", frame)
-	desc.Size = UDim2.new(1, -28, 0, 0)
-	desc.Position = UDim2.fromOffset(16, 36)
+	desc.Size = UDim2.new(1, -62, 0, 0)
+	desc.Position = UDim2.fromOffset(34, 26)
 	desc.BackgroundTransparency = 1
 	desc.Text = props.Description
 	desc.TextColor3 = Config.Theme.TextSecondary
 	desc.TextSize = 13
-	desc.Font = Enum.Font.Gotham
+	desc.Font = Fonts.Regular
 	desc.TextXAlignment = Enum.TextXAlignment.Left
 	desc.TextWrapped = true
 	desc.AutomaticSize = Enum.AutomaticSize.Y
@@ -714,7 +862,7 @@ function UI.CreateNotification(props)
 	close.Text = "×"
 	close.TextColor3 = Config.Theme.TextMuted
 	close.TextSize = 20
-	close.Font = Enum.Font.GothamBold
+	close.Font = Fonts.Bold
  
 	local obj = {
 		Instance = frame,
@@ -740,7 +888,7 @@ function UI.CreateWipBadge(props)
 	label.Text = "WIP"
 	label.TextColor3 = Config.Theme.Background
 	label.TextSize = 10
-	label.Font = Enum.Font.GothamBold
+	label.Font = Fonts.Bold
 	return badge
 end
  
@@ -754,59 +902,46 @@ ScreenGui.ScreenInsets = Enum.ScreenInsets.None
 ScreenGui.Parent = PlayerGui
  
 -- ═══════════════════════════════════════════════════════════════
--- PLAYER LIST (Bottom Right — avoids default top-right player list)
+-- PLAYER LIST (Bottom Right)
 -- ═══════════════════════════════════════════════════════════════
 local PLFrame = Instance.new("Frame")
 PLFrame.Name = "PlayerList"
 PLFrame.Size = UDim2.new(0, 280, 0, 320)
 PLFrame.Position = UDim2.new(1, -300, 1, -340)
-PLFrame.BackgroundColor3 = Config.Theme.Background
-PLFrame.BackgroundTransparency = 0.12
+PLFrame.BackgroundColor3 = Color3.new(1, 1, 1)
+PLFrame.BackgroundTransparency = 0.08
 PLFrame.BorderSizePixel = 0
 PLFrame.Visible = false
 PLFrame.ZIndex = 5
-PLFrame:SetAttribute("origTrans", 0.12)
+PLFrame:SetAttribute("origTrans", 0.08)
 PLFrame.Parent = ScreenGui
-UI.Corner(PLFrame, 12)
-UI.Stroke(PLFrame, Config.Theme.BorderLight, 1)
+UI.Corner(PLFrame, 16)
+UI.GlowStroke(PLFrame, 1.25)
 UI.Shadow(PLFrame, 28)
-UI.PanelGradient(PLFrame, 90)
+UI.PanelGradient(PLFrame, 100)
  
-local PLHeader = Instance.new("Frame", PLFrame)
-PLHeader.Size = UDim2.new(1, 0, 0, 44)
-PLHeader.BackgroundColor3 = Config.Theme.Panel
-PLHeader.BackgroundTransparency = 0.3
-PLHeader.BorderSizePixel = 0
-UI.Corner(PLHeader, 12)
+local PLHeader = UI.PanelHeader(PLFrame, "Players", {TextSize = 15, RightPad = 60})
+ 
+local PLCountBadge = Instance.new("Frame", PLHeader)
+PLCountBadge.Size = UDim2.fromOffset(34, 20)
+PLCountBadge.Position = UDim2.new(1, -46, 0.5, -10)
+PLCountBadge.BackgroundColor3 = Config.Theme.Accent
+PLCountBadge.BackgroundTransparency = 0.82
+PLCountBadge.BorderSizePixel = 0
+UI.Corner(PLCountBadge, 10)
+local PLCountStroke = Instance.new("UIStroke", PLCountBadge)
+PLCountStroke.Color = Config.Theme.Accent
+PLCountStroke.Thickness = 1
+PLCountStroke.Transparency = 0.5
 
--- Slim accent-gradient underline so the header reads as a distinct,
--- branded strip instead of just a slightly-lighter grey block.
-local PLHeaderAccent = Instance.new("Frame", PLHeader)
-PLHeaderAccent.Size = UDim2.new(1, 0, 0, 2)
-PLHeaderAccent.Position = UDim2.new(0, 0, 1, -2)
-PLHeaderAccent.BackgroundColor3 = Color3.new(1, 1, 1)
-PLHeaderAccent.BorderSizePixel = 0
-UI.AccentGradient(PLHeaderAccent, 0)
- 
-local PLTitle = Instance.new("TextLabel", PLHeader)
-PLTitle.Size = UDim2.new(1, -70, 1, 0)
-PLTitle.Position = UDim2.fromOffset(14, 0)
-PLTitle.BackgroundTransparency = 1
-PLTitle.Text = "Players"
-PLTitle.TextColor3 = Config.Theme.TextPrimary
-PLTitle.TextSize = 15
-PLTitle.Font = Enum.Font.GothamBold
-PLTitle.TextXAlignment = Enum.TextXAlignment.Left
- 
-local PLCount = Instance.new("TextLabel", PLHeader)
-PLCount.Size = UDim2.fromOffset(50, 44)
-PLCount.Position = UDim2.new(1, -60, 0, 0)
+local PLCount = Instance.new("TextLabel", PLCountBadge)
+PLCount.Size = UDim2.fromScale(1, 1)
 PLCount.BackgroundTransparency = 1
 PLCount.Text = "0"
-PLCount.TextColor3 = Config.Theme.TextMuted
+PLCount.TextColor3 = Config.Theme.Accent
 PLCount.TextSize = 13
-PLCount.Font = Enum.Font.Gotham
-PLCount.TextXAlignment = Enum.TextXAlignment.Right
+PLCount.Font = Fonts.Bold
+PLCount.TextXAlignment = Enum.TextXAlignment.Center
  
 local PLScroll = Instance.new("ScrollingFrame", PLFrame)
 PLScroll.Size = UDim2.new(1, -10, 1, -54)
@@ -819,16 +954,8 @@ PLScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 PLScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
 Instance.new("UIListLayout", PLScroll).Padding = UDim.new(0, 5)
  
--- Player list logic
 local PlayerEntries = {}
 local ThumbCache = {}
-
--- Forward declarations: the player-list click handler (inside AddPlayer,
--- defined further below) needs to reference the avatar/friend panel, but
--- that panel is built further down the file (after the Notifications
--- section, since it reuses ShowNotification). Declaring the locals here
--- and assigning them later lets AddPlayer's closures capture the right
--- upvalue instead of silently falling through to a nil global.
 local OpenAvatarPanel
 local CloseAvatarPanel
  
@@ -855,7 +982,6 @@ local function AddPlayer(plr)
  
 	local conns = {}
 
-	-- Click anywhere on this player's row to open the avatar/friend panel.
 	table.insert(conns, entry.Instance.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			if OpenAvatarPanel then OpenAvatarPanel(plr) end
@@ -903,7 +1029,6 @@ local function AddPlayer(plr)
 		table.insert(conns, ls.ChildRemoved:Connect(Refresh))
 	end
  
-	-- LATE LEADERSTATS DETECTION
 	table.insert(conns, plr.ChildAdded:Connect(function(child)
 		if child.Name == "leaderstats" and child:IsA("Folder") then
 			for _, c in ipairs(child:GetChildren()) do
@@ -925,7 +1050,6 @@ local function AddPlayer(plr)
 	table.insert(conns, plr:GetPropertyChangedSignal("Team"):Connect(Refresh))
 	Refresh()
 
-	-- Click to open detail panel
 	PlayerEntries[plr] = {Frame = entry, Connections = conns}
 end
  
@@ -961,49 +1085,24 @@ UserInputService.InputBegan:Connect(function(input, gp)
 end)
 
 -- ═══════════════════════════════════════════════════════════════
--- ═══════════════════════════════════════════════════════════════
--- CHAT (Top Left — the ONLY chat now that CoreGui Chat + TextChatService's
--- default UI are both disabled)
+-- CHAT (Top Left)
 -- ═══════════════════════════════════════════════════════════════
 local ChatFrame = Instance.new("Frame")
 ChatFrame.Name = "Chat"
 ChatFrame.Size = UDim2.new(0, 400, 0, 260)
 ChatFrame.Position = UDim2.new(0, Config.Chat.Position.X, 0, Config.Chat.Position.Y)
-ChatFrame.BackgroundColor3 = Config.Theme.Background
-ChatFrame.BackgroundTransparency = 0.12
+ChatFrame.BackgroundColor3 = Color3.new(1, 1, 1)
+ChatFrame.BackgroundTransparency = 0.08
 ChatFrame.BorderSizePixel = 0
 ChatFrame.ZIndex = 5
-ChatFrame:SetAttribute("origTrans", 0.12)
+ChatFrame:SetAttribute("origTrans", 0.08)
 ChatFrame.Parent = ScreenGui
-UI.Corner(ChatFrame, 12)
-UI.Stroke(ChatFrame, Config.Theme.BorderLight, 1)
+UI.Corner(ChatFrame, 16)
+UI.GlowStroke(ChatFrame, 1.25)
 UI.Shadow(ChatFrame, 28)
-UI.PanelGradient(ChatFrame, 90)
+UI.PanelGradient(ChatFrame, 100)
  
-local ChatHeader = Instance.new("Frame", ChatFrame)
-ChatHeader.Name = "Header"
-ChatHeader.Size = UDim2.new(1, 0, 0, 28)
-ChatHeader.BackgroundColor3 = Config.Theme.Panel
-ChatHeader.BackgroundTransparency = 0.3
-ChatHeader.BorderSizePixel = 0
-UI.Corner(ChatHeader, 12)
-
-local ChatHeaderAccent = Instance.new("Frame", ChatHeader)
-ChatHeaderAccent.Size = UDim2.new(1, 0, 0, 2)
-ChatHeaderAccent.Position = UDim2.new(0, 0, 1, -2)
-ChatHeaderAccent.BackgroundColor3 = Color3.new(1, 1, 1)
-ChatHeaderAccent.BorderSizePixel = 0
-UI.AccentGradient(ChatHeaderAccent, 0)
-
-local ChatTitle = Instance.new("TextLabel", ChatHeader)
-ChatTitle.Size = UDim2.new(1, -40, 1, 0)
-ChatTitle.Position = UDim2.fromOffset(10, 0)
-ChatTitle.BackgroundTransparency = 1
-ChatTitle.Text = "Chat"
-ChatTitle.TextColor3 = Config.Theme.TextPrimary
-ChatTitle.TextSize = 13
-ChatTitle.Font = Enum.Font.GothamBold
-ChatTitle.TextXAlignment = Enum.TextXAlignment.Left
+local ChatHeader, ChatTitle = UI.PanelHeader(ChatFrame, "Chat", {Height = 28, TextSize = 13, RightPad = 40})
 
 local ChatMinBtn = Instance.new("TextButton", ChatHeader)
 ChatMinBtn.Name = "Minimize"
@@ -1013,9 +1112,8 @@ ChatMinBtn.BackgroundTransparency = 1
 ChatMinBtn.Text = "−"
 ChatMinBtn.TextColor3 = Config.Theme.TextMuted
 ChatMinBtn.TextSize = 18
-ChatMinBtn.Font = Enum.Font.GothamBold
+ChatMinBtn.Font = Fonts.Bold
 
--- Drag-to-move chat
 local ChatDragging = false
 local ChatDragOffset = Vector2.new(0, 0)
 
@@ -1077,20 +1175,19 @@ ChatInput.PlaceholderText = "Enter to chat, /w <player> <msg> to whisper..."
 ChatInput.TextColor3 = Config.Theme.TextPrimary
 ChatInput.PlaceholderColor3 = Config.Theme.TextMuted
 ChatInput.TextSize = 13
-ChatInput.Font = Enum.Font.Gotham
+ChatInput.Font = Fonts.Regular
 ChatInput.ClearTextOnFocus = false
  
--- Chat toggle button
 local ChatToggleBtn = Instance.new("TextButton")
 ChatToggleBtn.Name = "ChatToggle"
 ChatToggleBtn.Size = UDim2.fromOffset(70, 28)
 ChatToggleBtn.Position = UDim2.new(0, Config.Chat.Position.X, 0, Config.Chat.Position.Y)
 ChatToggleBtn.BackgroundColor3 = Config.Theme.Background
 ChatToggleBtn.BackgroundTransparency = 0.15
-ChatToggleBtn.Text = "💬 Chat"
+ChatToggleBtn.Text = "CHAT"
 ChatToggleBtn.TextColor3 = Config.Theme.TextPrimary
 ChatToggleBtn.TextSize = 12
-ChatToggleBtn.Font = Enum.Font.GothamBold
+ChatToggleBtn.Font = Fonts.Bold
 ChatToggleBtn.BorderSizePixel = 0
 ChatToggleBtn.ZIndex = 5
 ChatToggleBtn.Visible = false
@@ -1126,7 +1223,6 @@ ChatToggleBtn.MouseButton1Click:Connect(ToggleChat)
 local ChatEnabled = (TextChatService.ChatVersion == Enum.ChatVersion.TextChatService)
 local Messages = {}
  
--- ─── CHAT HELPERS ───
 local function ColorToHex(c)
 	return string.format("%02X%02X%02X",
 		math.floor(c.R * 255 + 0.5),
@@ -1134,12 +1230,6 @@ local function ColorToHex(c)
 		math.floor(c.B * 255 + 0.5))
 end
  
--- FIXED/ADDED: raw player/message text was being dropped straight into a
--- RichText label. Anything containing "<", ">" or "&" (a name someone
--- managed to sneak past the filter, a message that happens to contain
--- those characters, etc.) would either break the label's formatting or,
--- worse, let someone forge fake colored/bold text. Everything user-supplied
--- now goes through this before it touches a RichText label.
 local function EscapeRichText(s)
 	s = tostring(s or "")
 	s = s:gsub("&", "&amp;")
@@ -1149,27 +1239,6 @@ local function EscapeRichText(s)
 	return s
 end
  
--- ADDED: pulled the "make a line, fade it in, trim history, autoscroll"
--- logic out of the MessageReceived handler so whispers/system messages
--- can reuse it instead of duplicating (and risking drifting out of sync
--- with) that logic.
---
--- FIXED (chat "delay"): this used to set TextTransparency = 1 and then
--- tween it to 0 over 0.15s, and separately used a single task.defer to
--- move the scrollbar. Two problems stacked on top of each other:
---  1) AutomaticSize needs a layout pass to know the label's real height
---     before AutomaticCanvasSize on the ScrollingFrame can grow to fit
---     it — a single task.defer (one frame) isn't reliably enough time
---     for that chain to settle, so the frame would sometimes snap/scroll
---     late, reading as "lag".
---  2) On top of that, the 0.15s opacity tween itself is a real, visible
---     delay before the text is fully readable — which is why it felt
---     laggy here but not in the bubble chat above characters' heads
---     (bubbles pop in over the same-ish duration, but there's no dense
---     block of scrollback shifting underneath them at the same time).
--- Fix: show text at full opacity immediately (no fade-in) and wait an
--- extra frame before snapping the scrollbar so AutomaticCanvasSize has
--- actually caught up.
 local function AppendChatLine(richText)
 	local row = Instance.new("Frame", ChatScroll)
 	row.BackgroundColor3 = Config.Theme.Surface
@@ -1190,13 +1259,12 @@ local function AppendChatLine(richText)
 	lbl.BackgroundTransparency = 1
 	lbl.TextColor3 = Config.Theme.TextPrimary
 	lbl.TextSize = 14
-	lbl.Font = Enum.Font.Gotham
+	lbl.Font = Fonts.Regular
 	lbl.TextXAlignment = Enum.TextXAlignment.Left
 	lbl.TextWrapped = true
 	lbl.AutomaticSize = Enum.AutomaticSize.Y
 	lbl.RichText = true
 	lbl.Text = richText
-	-- No fade — text appears instantly, matching a normal chat feed.
 
 	table.insert(Messages, row)
 	while #Messages > Config.Chat.MaxMessages do
@@ -1204,9 +1272,6 @@ local function AppendChatLine(richText)
 		if old then old:Destroy() end
 	end
 
-	-- Wait two frames: one for this label's AutomaticSize to resolve,
-	-- one more for the ScrollingFrame's AutomaticCanvasSize to catch up
-	-- to that new content height — then snap to bottom.
 	task.defer(function()
 		task.defer(function()
 			if ChatScroll and ChatScroll.Parent then
@@ -1216,15 +1281,6 @@ local function AppendChatLine(richText)
 	end)
 end
  
--- ─── WHISPER ───
--- Roblox's "/w" and "/whisper" are handled by RBXWhisperCommand, which is
--- hardcoded into TextChatService — it can't even be turned off, and it
--- works purely off ch:SendAsync(text), with no custom command handling
--- and no server script needed on our end. Sending "/w Bob hey" through
--- SendAsync (below, in FocusLost) is all that's required to trigger it.
--- The one thing left for us to do client-side is recognize the private
--- "RBXWhisper:<id1>_<id2>" channel it creates and render those messages
--- with a "To/From" label instead of the normal sender-name format.
 local function GetWhisperInfo(msg)
 	local channel = msg.TextChannel
 	if not channel then return nil end
@@ -1251,7 +1307,7 @@ if not ChatEnabled then
 	fb.Text = "TextChatService not enabled.\nChat features unavailable."
 	fb.TextColor3 = Config.Theme.Warning
 	fb.TextSize = 13
-	fb.Font = Enum.Font.Gotham
+	fb.Font = Fonts.Regular
 	fb.TextWrapped = true
 else
 	TextChatService.MessageReceived:Connect(function(msg)
@@ -1297,19 +1353,11 @@ else
 		local text = ChatInput.Text
 		ChatInput.Text = ""
  
-		-- Just send it as-is. "/w Bob hi" and "/whisper Bob hi" are handled
-		-- automatically by RBXWhisperCommand once it's actually the only
-		-- thing listening (see the ChatWindowConfiguration/ChatInputBarConfiguration
-		-- fix near the top) — no manual command parsing needed here.
 		local ch = TextChatService.TextChannels:FindFirstChild("RBXGeneral")
 		if ch then pcall(function() ch:SendAsync(text) end) end
 	end)
 end
  
--- Since the native Chat CoreGui AND the TextChatService default UI are
--- both disabled, our TextBox is now the only place "/" and Enter can
--- meaningfully open chat — no more competing listener underneath it, so
--- no more fighting over focus.
 UserInputService.InputBegan:Connect(function(input, gp)
 	if gp then return end
 	if input.KeyCode == Enum.KeyCode.Minus then return end
@@ -1346,38 +1394,40 @@ local SetFrame = Instance.new("Frame")
 SetFrame.Name = "Settings"
 SetFrame.Size = UDim2.fromOffset(600, 420)
 SetFrame.Position = UDim2.new(0.5, -300, 0.5, -210)
-SetFrame.BackgroundColor3 = Config.Theme.Background
-SetFrame.BackgroundTransparency = 0.08
+SetFrame.BackgroundColor3 = Color3.new(1, 1, 1)
+SetFrame.BackgroundTransparency = 0.05
 SetFrame.BorderSizePixel = 0
 SetFrame.Visible = false
 SetFrame.ZIndex = 25
 SetFrame.Parent = ScreenGui
-SetFrame.Active = true -- CRITICAL: without this, Frames don't block input, so clicks
--- on sliders/toggles/empty space fall through to the Overlay behind and close the modal
-SetFrame:SetAttribute("origTrans", 0.08)
-UI.Corner(SetFrame, 14)
-UI.Stroke(SetFrame, Config.Theme.BorderLight, 1)
+SetFrame.Active = true
+SetFrame:SetAttribute("origTrans", 0.05)
+UI.Corner(SetFrame, 18)
+UI.GlowStroke(SetFrame, 1.5)
 UI.Shadow(SetFrame, 36)
-UI.PanelGradient(SetFrame, 90)
+UI.PanelGradient(SetFrame, 100)
  
--- Inner clip layer: holds Sidebar/Content/CloseBtn and clips them to a
--- rounded rect, WITHOUT clipping the Shadow image above (which needs to
--- bleed outside SetFrame's bounds for the glow effect).
 local SetInner = Instance.new("Frame", SetFrame)
 SetInner.Size = UDim2.fromScale(1, 1)
 SetInner.BackgroundTransparency = 1
 SetInner.BorderSizePixel = 0
 SetInner.ClipsDescendants = true
-UI.Corner(SetInner, 14)
+UI.Corner(SetInner, 18)
  
 local Sidebar = Instance.new("Frame", SetInner)
 Sidebar.Size = UDim2.new(0, 160, 1, 0)
 Sidebar.BackgroundColor3 = Config.Theme.Panel
 Sidebar.BackgroundTransparency = 0.4
 Sidebar.BorderSizePixel = 0
--- (no UICorner here on purpose — a rounded right edge here would show as a
--- gap against Content's straight left edge; SetInner's rounded clip above
--- is what gives the whole modal its rounded look)
+-- FIXED: ClipsDescendants clips to a plain rectangle, not the UICorner
+-- shape, even on the same instance — so SetInner's rounding never
+-- actually cut Sidebar's square corners, and they sat squarely on top
+-- of SetFrame's rounded corners underneath (the outline looked rounded
+-- because it's drawn directly on SetFrame, unblocked by any child).
+-- Rounding Sidebar directly fixes the two real outer corners; its two
+-- inner corners get a small, near-invisible notch since Sidebar's
+-- color closely matches the panel gradient behind it.
+UI.Corner(Sidebar, 18)
  
 local SidebarPadding = Instance.new("UIPadding", Sidebar)
 SidebarPadding.PaddingTop = UDim.new(0, 14)
@@ -1390,13 +1440,13 @@ SidebarLayout.SortOrder = Enum.SortOrder.LayoutOrder
  
 local SetTitle = Instance.new("TextLabel", Sidebar)
 SetTitle.Name = "Title"
-SetTitle.LayoutOrder = -2 -- always first, regardless of alphabetical Name sorting
+SetTitle.LayoutOrder = -2
 SetTitle.Size = UDim2.new(1, 0, 0, 26)
 SetTitle.BackgroundTransparency = 1
-SetTitle.Text = "Settings"
+SetTitle.Text = Tracked("SETTINGS")
 SetTitle.TextColor3 = Config.Theme.TextPrimary
-SetTitle.TextSize = 16
-SetTitle.Font = Enum.Font.GothamBold
+SetTitle.TextSize = 15
+SetTitle.Font = Fonts.Heavy
 SetTitle.TextXAlignment = Enum.TextXAlignment.Left
 
 local SetTitleAccent = Instance.new("Frame", Sidebar)
@@ -1412,26 +1462,25 @@ Content.Size = UDim2.new(1, -160, 1, 0)
 Content.Position = UDim2.fromOffset(160, 0)
 Content.BackgroundTransparency = 1
 local ContentPadding = Instance.new("UIPadding", Content)
-ContentPadding.PaddingTop = UDim.new(0, 52) -- was 16 — cleared so content starts below the × button instead of behind it
+ContentPadding.PaddingTop = UDim.new(0, 52)
 ContentPadding.PaddingLeft = UDim.new(0, 16)
 ContentPadding.PaddingRight = UDim.new(0, 16)
 ContentPadding.PaddingBottom = UDim.new(0, 16)
 Instance.new("UIListLayout", Content).Padding = UDim.new(0, 8)
  
 local CloseBtn = Instance.new("TextButton", SetFrame)
-CloseBtn.Size = UDim2.fromOffset(34, 34) -- was 30x30 with no visible background — bigger + a real background makes it far easier to hit
+CloseBtn.Size = UDim2.fromOffset(34, 34)
 CloseBtn.Position = UDim2.new(1, -44, 0, 8)
-CloseBtn.ZIndex = 30 -- guarantees it renders above the FOV slider's value label, which sat in the same corner
+CloseBtn.ZIndex = 30
 CloseBtn.BackgroundColor3 = Config.Theme.Surface
 CloseBtn.BackgroundTransparency = 0.25
 CloseBtn.AutoButtonColor = false
 CloseBtn.Text = "×"
 CloseBtn.TextColor3 = Config.Theme.TextMuted
 CloseBtn.TextSize = 22
-CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.Font = Fonts.Bold
 UI.Corner(CloseBtn, 8)
  
--- FIXED: Close button hover feedback (background + text color, so it reads as a real button)
 CloseBtn.MouseEnter:Connect(function()
 	TweenService:Create(CloseBtn, TweenInfo.new(0.1), {
 		TextColor3 = Config.Theme.TextPrimary,
@@ -1446,10 +1495,6 @@ CloseBtn.MouseLeave:Connect(function()
 		BackgroundTransparency = 0.25,
 	}):Play()
 end)
- 
--- Background click no longer closes the modal — only the Settings key
--- (,) or the × button do. (Overlay still dims the background, it just
--- doesn't listen for clicks anymore.)
  
 local SettingsOpen = false
 local function ToggleSettings()
@@ -1474,10 +1519,10 @@ UserInputService.InputBegan:Connect(function(input, gp)
 	if input.KeyCode == Config.SettingsKey then ToggleSettings() end
 end)
  
--- Settings builder
 local Categories = {}
 local CurrentCat = ""
 local SidebarButtons = {}
+local SidebarIndicators = {}
  
 local function SelectCat(name)
 	CurrentCat = name
@@ -1485,26 +1530,55 @@ local function SelectCat(name)
 	for _, btn in ipairs(SidebarButtons) do
 		local isActive = (btn.Name == name)
 		btn.BackgroundColor3 = isActive and Config.Theme.SurfaceHover or Config.Theme.Surface
-		btn.BackgroundTransparency = isActive and 0.2 or 0.4
+		btn.BackgroundTransparency = isActive and 0.1 or 0.4
+		local indicator = SidebarIndicators[btn]
+		if indicator then
+			Animation:_playTween(indicator, TweenInfo.new(0.15), {BackgroundTransparency = isActive and 0 or 1})
+		end
 	end
 end
  
-local function AddSection(name)
+local function AddSection(name, icon)
 	local btn = Instance.new("TextButton", Sidebar)
 	btn.Name = name
-	btn.LayoutOrder = #SidebarButtons -- preserves call order instead of alphabetical Name sort
-	btn.Size = UDim2.new(1, 0, 0, 36)
+	btn.LayoutOrder = #SidebarButtons
+	btn.Size = UDim2.new(1, 0, 0, 38)
 	btn.BackgroundColor3 = Config.Theme.Surface
 	btn.BackgroundTransparency = 0.4
-	btn.Text = name
-	btn.TextColor3 = Config.Theme.TextPrimary
-	btn.TextSize = 14
-	btn.Font = Enum.Font.GothamMedium
+	btn.Text = ""
 	btn.AutoButtonColor = false
 	btn.BorderSizePixel = 0
-	UI.Corner(btn, 8)
+	UI.Corner(btn, 9)
+
+	local indicator = Instance.new("Frame", btn)
+	indicator.Size = UDim2.new(0, 3, 1, -12)
+	indicator.Position = UDim2.new(0, 0, 0, 6)
+	indicator.BackgroundColor3 = Color3.new(1, 1, 1)
+	indicator.BackgroundTransparency = 1
+	indicator.BorderSizePixel = 0
+	UI.Corner(indicator, 2)
+	UI.AccentGradient(indicator, 90)
+	SidebarIndicators[btn] = indicator
+
+	local iconLbl = Instance.new("TextLabel", btn)
+	iconLbl.Size = UDim2.fromOffset(20, 20)
+	iconLbl.Position = UDim2.fromOffset(12, 9)
+	iconLbl.BackgroundTransparency = 1
+	iconLbl.Text = icon or "•"
+	iconLbl.TextSize = 15
+	iconLbl.Font = Fonts.Bold
+	iconLbl.TextColor3 = Config.Theme.TextSecondary
+
+	local textLbl = Instance.new("TextLabel", btn)
+	textLbl.Size = UDim2.new(1, -44, 1, 0)
+	textLbl.Position = UDim2.fromOffset(38, 0)
+	textLbl.BackgroundTransparency = 1
+	textLbl.Text = name
+	textLbl.TextColor3 = Config.Theme.TextPrimary
+	textLbl.TextSize = 14
+	textLbl.Font = Fonts.Medium
+	textLbl.TextXAlignment = Enum.TextXAlignment.Left
  
-	-- FIXED: Custom hover that respects active state (no flicker)
 	btn.MouseEnter:Connect(function()
 		if CurrentCat ~= name then
 			TweenService:Create(btn, TweenInfo.new(0.1), {BackgroundColor3 = Config.Theme.SurfaceHover}):Play()
@@ -1576,7 +1650,6 @@ AddToggle("General", "Chat Timestamps", Config.Chat.ShowTimestamps, function(v)
 	SaveSettings()
 end)
 
--- Reset Chat Position button
 local resetRow = Instance.new("Frame", Categories["General"])
 resetRow.Size = UDim2.new(1, 0, 0, 36)
 resetRow.BackgroundTransparency = 1
@@ -1586,7 +1659,7 @@ resetLbl.BackgroundTransparency = 1
 resetLbl.Text = "Chat Position"
 resetLbl.TextColor3 = Config.Theme.TextPrimary
 resetLbl.TextSize = 14
-resetLbl.Font = Enum.Font.Gotham
+resetLbl.Font = Fonts.Regular
 resetLbl.TextXAlignment = Enum.TextXAlignment.Left
 local resetBtn = UI.CreateButton({
 	Parent = resetRow,
@@ -1629,7 +1702,7 @@ if controlsFrame then
 	lbl.Text = "Key remapping coming in a future update."
 	lbl.TextColor3 = Config.Theme.TextPrimary
 	lbl.TextSize = 13
-	lbl.Font = Enum.Font.Gotham
+	lbl.Font = Fonts.Regular
 	lbl.TextXAlignment = Enum.TextXAlignment.Left
  
 	local badge = UI.CreateWipBadge({Parent = row})
@@ -1638,7 +1711,7 @@ if controlsFrame then
 end
  
 -- ═══════════════════════════════════════════════════════════════
--- NOTIFICATIONS (Top Right, below topbar area)
+-- NOTIFICATIONS (Top Right)
 -- ═══════════════════════════════════════════════════════════════
 local NotifContainer = Instance.new("Frame")
 NotifContainer.Name = "Notifications"
@@ -1667,9 +1740,8 @@ local function ShowNotification(props)
 	notif.Instance.BackgroundTransparency = 1
 	notif.Instance.Position = notif.Instance.Position + UDim2.fromOffset(20, 0)
  
-	-- FIXED: Safer animation without race-condition height read
 	Animation:Fade(notif.Instance, 0.05, 0.22)
-	local targetPos = UDim2.new(0, 0, 0, 0) -- relative to parent list layout
+	local targetPos = UDim2.new(0, 0, 0, 0)
 	Animation:_playTween(notif.Instance, TweenInfo.new(0.25, Enum.EasingStyle.Quint), {
 		Position = targetPos
 	})
@@ -1689,25 +1761,24 @@ local function ShowNotification(props)
 end
  
 -- ═══════════════════════════════════════════════════════════════
--- PLAYER ACTION PANEL — click a row in the Players list to add-friend
--- or view a bigger avatar shot. Sits to the left of the player list.
+-- PLAYER ACTION PANEL
 -- ═══════════════════════════════════════════════════════════════
 local AvatarPanel = Instance.new("Frame")
 AvatarPanel.Name = "PlayerActionPanel"
 AvatarPanel.Size = UDim2.fromOffset(240, 340)
 AvatarPanel.Position = UDim2.new(1, -560, 1, -360)
-AvatarPanel.BackgroundColor3 = Config.Theme.Background
-AvatarPanel.BackgroundTransparency = 0.08
+AvatarPanel.BackgroundColor3 = Color3.new(1, 1, 1)
+AvatarPanel.BackgroundTransparency = 0.05
 AvatarPanel.BorderSizePixel = 0
 AvatarPanel.Visible = false
 AvatarPanel.ZIndex = 15
-AvatarPanel.Active = true -- blocks clicks from falling through to whatever's behind it
-AvatarPanel:SetAttribute("origTrans", 0.08)
+AvatarPanel.Active = true
+AvatarPanel:SetAttribute("origTrans", 0.05)
 AvatarPanel.Parent = ScreenGui
-UI.Corner(AvatarPanel, 12)
-UI.Stroke(AvatarPanel, Config.Theme.BorderLight, 1)
+UI.Corner(AvatarPanel, 16)
+UI.GlowStroke(AvatarPanel, 1.25)
 UI.Shadow(AvatarPanel, 28)
-UI.PanelGradient(AvatarPanel, 90)
+UI.PanelGradient(AvatarPanel, 100)
 
 local APClose = Instance.new("TextButton", AvatarPanel)
 APClose.Size = UDim2.fromOffset(26, 26)
@@ -1719,7 +1790,7 @@ APClose.AutoButtonColor = false
 APClose.Text = "×"
 APClose.TextColor3 = Config.Theme.TextMuted
 APClose.TextSize = 18
-APClose.Font = Enum.Font.GothamBold
+APClose.Font = Fonts.Bold
 UI.Corner(APClose, 8)
 
 APClose.MouseEnter:Connect(function()
@@ -1754,7 +1825,7 @@ APName.BackgroundTransparency = 1
 APName.Text = ""
 APName.TextColor3 = Config.Theme.TextPrimary
 APName.TextSize = 16
-APName.Font = Enum.Font.GothamBold
+APName.Font = Fonts.Heavy
 APName.TextXAlignment = Enum.TextXAlignment.Center
 APName.ZIndex = 16
 
@@ -1765,7 +1836,7 @@ APUser.BackgroundTransparency = 1
 APUser.Text = ""
 APUser.TextColor3 = Config.Theme.TextMuted
 APUser.TextSize = 13
-APUser.Font = Enum.Font.Gotham
+APUser.Font = Fonts.Regular
 APUser.TextXAlignment = Enum.TextXAlignment.Center
 APUser.ZIndex = 16
 
@@ -1773,7 +1844,7 @@ local APFriendBtn = UI.CreateButton({
 	Parent = AvatarPanel,
 	Size = UDim2.new(1, -20, 0, 36),
 	Position = UDim2.fromOffset(10, 244),
-	Text = "➕ Add Friend",
+	Text = "Add Friend",
 })
 APFriendBtn.Instance.ZIndex = 16
 
@@ -1781,14 +1852,14 @@ local APProfileBtn = UI.CreateButton({
 	Parent = AvatarPanel,
 	Size = UDim2.new(1, -20, 0, 36),
 	Position = UDim2.fromOffset(10, 286),
-	Text = "👤 View Profile",
+	Text = "View Profile",
+	Primary = true,
 })
 APProfileBtn.Instance.ZIndex = 16
 
 local AvatarPanelVisible = false
 local CurrentTargetPlayer = nil
 
--- Bigger, closer-cropped thumbnail than the 48x48 one used in the list row.
 local FullThumbCache = {}
 local function GetFullThumbnail(userId, cb)
 	if FullThumbCache[userId] then cb(FullThumbCache[userId]) return end
@@ -1826,16 +1897,15 @@ OpenAvatarPanel = function(plr)
 		end
 	end)
 
-	-- Reflect current friend status on the button, when the platform lets us ask.
-	local label, enabled = "➕ Add Friend", true
+	local label, enabled = "Add Friend", true
 	local ok, status = pcall(function() return LocalPlayer:GetFriendStatus(plr) end)
 	if ok then
 		if status == Enum.FriendStatus.Friend then
-			label, enabled = "✓ Already Friends", false
+			label, enabled = "Already Friends", false
 		elseif status == Enum.FriendStatus.FriendRequestSent then
 			label, enabled = "Request Sent", false
 		elseif status == Enum.FriendStatus.FriendRequestReceived then
-			label, enabled = "➕ Accept Request", true
+			label, enabled = "Accept Request", true
 		end
 	end
 	APFriendBtn:SetText(label)
@@ -1850,10 +1920,6 @@ APClose.MouseButton1Click:Connect(function() CloseAvatarPanel() end)
 
 APFriendBtn.Instance.MouseButton1Click:Connect(function()
 	if not CurrentTargetPlayer then return end
-	-- Native Roblox "send/accept friend request" prompt. Wrapped in pcall
-	-- since the SetCore key isn't guaranteed to exist on every platform
-	-- (e.g. some console/embedded clients), and we don't want a missing
-	-- key to error out the rest of the script.
 	local target = CurrentTargetPlayer
 	local ok = pcall(function()
 		StarterGui:SetCore("PromptSendFriendRequest", target)
@@ -1867,21 +1933,13 @@ APProfileBtn.Instance.MouseButton1Click:Connect(function()
 	if not CurrentTargetPlayer then return end
 	local target = CurrentTargetPlayer
 
-	-- FIXED (correct API): "PromptViewProfile" isn't a real SetCore key —
-	-- it doesn't exist in Roblox's SetCore list, so it always failed and
-	-- always hit the fallback toast, regardless of platform. The real API
-	-- for this is the Avatar Context Menu, enabled once at startup above.
-	-- Opening it here targets this specific player and gives them the
-	-- native Friend / Chat / View (appearance) / Wave menu — "View" is
-	-- the actual built-in profile/appearance inspector.
 	local ok = pcall(function()
 		StarterGui:SetCore("AvatarContextMenuTarget", target)
 	end)
 
 	if ok then
-		CloseAvatarPanel() -- hand off to the native ACM overlay instead of stacking two panels
+		CloseAvatarPanel()
 	else
-		-- Only reachable if ACM itself isn't available on this platform.
 		local profileUrl = string.format("https://www.roblox.com/users/%d/profile", target.UserId)
 		ShowNotification({
 			Title = "Profile Unavailable Here",
@@ -1908,39 +1966,72 @@ end)
 
 local StatsFrame = Instance.new("Frame")
 StatsFrame.Name = "Stats"
-StatsFrame.Size = UDim2.fromOffset(120, 50)
-StatsFrame.Position = UDim2.new(0, 12, 1, -62)
-StatsFrame.BackgroundColor3 = Config.Theme.Background
-StatsFrame.BackgroundTransparency = 0.15
+StatsFrame.Size = UDim2.fromOffset(168, 38)
+StatsFrame.Position = UDim2.new(0, 12, 1, -52)
+StatsFrame.BackgroundColor3 = Color3.new(1, 1, 1)
+StatsFrame.BackgroundTransparency = 0.08
 StatsFrame.BorderSizePixel = 0
 StatsFrame.ZIndex = 5
 StatsFrame.Parent = ScreenGui
-UI.Corner(StatsFrame, 8)
-UI.Stroke(StatsFrame, Config.Theme.BorderLight, 1)
+UI.Corner(StatsFrame, 20)
+UI.GlowStroke(StatsFrame, 1)
+UI.PanelGradient(StatsFrame, 100)
 
 local StatsLayout = Instance.new("UIListLayout", StatsFrame)
-StatsLayout.FillDirection = Enum.FillDirection.Vertical
+StatsLayout.FillDirection = Enum.FillDirection.Horizontal
 StatsLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 StatsLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-StatsLayout.Padding = UDim.new(0, 2)
+StatsLayout.Padding = UDim.new(0, 4)
 
-local FPSText = Instance.new("TextLabel", StatsFrame)
-FPSText.Size = UDim2.new(1, -8, 0, 18)
-FPSText.BackgroundTransparency = 1
-FPSText.Text = "FPS: --"
-FPSText.TextColor3 = Config.Theme.TextPrimary
-FPSText.TextSize = 12
-FPSText.Font = Enum.Font.GothamBold
-FPSText.TextXAlignment = Enum.TextXAlignment.Center
+local function CreateStatSegment()
+	local seg = Instance.new("Frame", StatsFrame)
+	seg.Size = UDim2.new(0, 78, 1, 0)
+	seg.BackgroundTransparency = 1
 
-local PingText = Instance.new("TextLabel", StatsFrame)
-PingText.Size = UDim2.new(1, -8, 0, 16)
-PingText.BackgroundTransparency = 1
-PingText.Text = "Ping: --ms"
-PingText.TextColor3 = Config.Theme.TextSecondary
-PingText.TextSize = 11
-PingText.Font = Enum.Font.GothamMedium
-PingText.TextXAlignment = Enum.TextXAlignment.Center
+	local dot = Instance.new("Frame", seg)
+	dot.Name = "Dot"
+	dot.Size = UDim2.fromOffset(7, 7)
+	dot.Position = UDim2.new(0, 6, 0.5, -3)
+	dot.BackgroundColor3 = Config.Theme.TextMuted
+	dot.BorderSizePixel = 0
+	UI.Corner(dot, 4)
+
+	local dotGlow = Instance.new("UIStroke", dot)
+	dotGlow.Name = "Glow"
+	dotGlow.Thickness = 3
+	dotGlow.Color = Config.Theme.TextMuted
+	dotGlow.Transparency = 0.75
+
+	local label = Instance.new("TextLabel", seg)
+	label.Name = "Label"
+	label.Size = UDim2.new(1, -22, 1, 0)
+	label.Position = UDim2.fromOffset(20, 0)
+	label.BackgroundTransparency = 1
+	label.Text = "--"
+	label.TextColor3 = Config.Theme.TextPrimary
+	label.TextSize = 13
+	label.Font = Fonts.Bold
+	label.TextXAlignment = Enum.TextXAlignment.Left
+
+	return {
+		SetValue = function(text, statusColor)
+			label.Text = text
+			local color = statusColor or Config.Theme.TextMuted
+			dot.BackgroundColor3 = color
+			dotGlow.Color = color
+		end,
+	}
+end
+
+local FPSStat = CreateStatSegment()
+
+local Divider = Instance.new("Frame", StatsFrame)
+Divider.Size = UDim2.new(0, 1, 0, 20)
+Divider.BackgroundColor3 = Config.Theme.BorderLight
+Divider.BackgroundTransparency = 0.3
+Divider.BorderSizePixel = 0
+
+local PingStat = CreateStatSegment()
 
 local frameCount = 0
 local lastUpdate = tick()
@@ -1951,14 +2042,8 @@ RunService.Heartbeat:Connect(function()
 		local fps = math.round(frameCount / (now - lastUpdate))
 		frameCount = 0
 		lastUpdate = now
-		FPSText.Text = "FPS: " .. fps
-		if fps >= 55 then
-			FPSText.TextColor3 = Config.Theme.Success
-		elseif fps >= 30 then
-			FPSText.TextColor3 = Config.Theme.Warning
-		else
-			FPSText.TextColor3 = Config.Theme.Error
-		end
+		local color = fps >= 55 and Config.Theme.Success or (fps >= 30 and Config.Theme.Warning or Config.Theme.Error)
+		FPSStat.SetValue(tostring(fps) .. " FPS", color)
 	end
 end)
 
@@ -1966,11 +2051,10 @@ local function UpdatePing()
 	local ok, ping = pcall(function() return LocalPlayer:GetNetworkPing() end)
 	if ok and ping then
 		local ms = math.floor(ping * 1000)
-		PingText.Text = "Ping: " .. ms .. "ms"
-		PingText.TextColor3 = ms < 80 and Config.Theme.Success or (ms < 160 and Config.Theme.Warning or Config.Theme.Error)
+		local color = ms < 80 and Config.Theme.Success or (ms < 160 and Config.Theme.Warning or Config.Theme.Error)
+		PingStat.SetValue(ms .. "ms", color)
 	else
-		PingText.Text = "Ping: --ms"
-		PingText.TextColor3 = Config.Theme.TextMuted
+		PingStat.SetValue("--ms", Config.Theme.TextMuted)
 	end
 end
 
@@ -2001,7 +2085,6 @@ local function CreateBubble(msg, senderPlr)
 	local head = char:FindFirstChild("Head")
 	if not head then return end
 
-	-- Remove old bubble from this player
 	if ActiveBubbles[senderPlr] then
 		local old = ActiveBubbles[senderPlr]
 		if old and old.Parent then
@@ -2024,7 +2107,6 @@ local function CreateBubble(msg, senderPlr)
 	bb.LightInfluence = 0
 	bb.Parent = BubbleContainer
 
-	-- Shadow / glow behind bubble
 	local shadow = Instance.new("ImageLabel", bb)
 	shadow.Name = "Shadow"
 	shadow.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -2038,7 +2120,6 @@ local function CreateBubble(msg, senderPlr)
 	shadow.SliceCenter = Rect.new(49, 49, 450, 450)
 	shadow.ZIndex = 0
 
-	-- Main black bubble
 	local bubbleFrame = Instance.new("Frame", bb)
 	bubbleFrame.Name = "BubbleFrame"
 	bubbleFrame.Size = UDim2.new(1, 0, 0, 0)
@@ -2051,21 +2132,18 @@ local function CreateBubble(msg, senderPlr)
 	local corner = Instance.new("UICorner", bubbleFrame)
 	corner.CornerRadius = UDim.new(0, 20)
 
-	-- Soft white border
 	local border = Instance.new("UIStroke", bubbleFrame)
 	border.Color = BubbleGlow
 	border.Thickness = 1.5
 	border.Transparency = 0.4
 	border.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 
-	-- Padding
 	local pad = Instance.new("UIPadding", bubbleFrame)
 	pad.PaddingLeft = UDim.new(0, 14)
 	pad.PaddingRight = UDim.new(0, 14)
 	pad.PaddingTop = UDim.new(0, 10)
 	pad.PaddingBottom = UDim.new(0, 12)
 
-	-- Name label
 	local nameLabel = Instance.new("TextLabel", bubbleFrame)
 	nameLabel.Name = "NameLabel"
 	nameLabel.Size = UDim2.new(1, 0, 0, 16)
@@ -2073,11 +2151,10 @@ local function CreateBubble(msg, senderPlr)
 	nameLabel.Text = senderPlr.DisplayName
 	nameLabel.TextColor3 = Config.Theme.Accent
 	nameLabel.TextSize = 11
-	nameLabel.Font = Enum.Font.GothamBold
+	nameLabel.Font = Fonts.Bold
 	nameLabel.TextXAlignment = Enum.TextXAlignment.Left
 	nameLabel.ZIndex = 3
 
-	-- Message text
 	local msgText = Instance.new("TextLabel", bubbleFrame)
 	msgText.Name = "MsgText"
 	msgText.Size = UDim2.new(1, 0, 0, 0)
@@ -2086,13 +2163,12 @@ local function CreateBubble(msg, senderPlr)
 	msgText.Text = msg.Text
 	msgText.TextColor3 = Color3.fromRGB(230, 230, 240)
 	msgText.TextSize = 14
-	msgText.Font = Enum.Font.Gotham
+	msgText.Font = Fonts.Regular
 	msgText.TextWrapped = true
 	msgText.TextXAlignment = Enum.TextXAlignment.Left
 	msgText.AutomaticSize = Enum.AutomaticSize.Y
 	msgText.ZIndex = 3
 
-	-- Round tail pointing down
 	local tail = Instance.new("Frame", bb)
 	tail.Name = "Tail"
 	tail.Size = UDim2.fromOffset(18, 14)
@@ -2106,16 +2182,14 @@ local function CreateBubble(msg, senderPlr)
 	local tailCorner = Instance.new("UICorner", tail)
 	tailCorner.CornerRadius = UDim.new(0, 6)
 
-	-- Whisper styling
 	local whisper = GetWhisperInfo(msg)
 	if whisper then
 		border.Color = Config.Theme.Warning
 		border.Transparency = 0.15
 		nameLabel.TextColor3 = Config.Theme.Warning
-		nameLabel.Text = "🔒 " .. senderPlr.DisplayName
+		nameLabel.Text = senderPlr.DisplayName .. "  (whisper)"
 	end
 
-	-- Animate in
 	bubbleFrame.Size = UDim2.new(1, 0, 0, 0)
 	bubbleFrame.BackgroundTransparency = 1
 	msgText.TextTransparency = 1
@@ -2140,7 +2214,6 @@ local function CreateBubble(msg, senderPlr)
 
 	ActiveBubbles[senderPlr] = bubbleFrame
 
-	-- Auto destroy
 	task.delay(6, function()
 		if bubbleFrame and bubbleFrame.Parent then
 			if Config.UIAnimations then
@@ -2163,7 +2236,6 @@ local function CreateBubble(msg, senderPlr)
 	end)
 end
 
--- Hook into message received for bubbles
 if ChatEnabled then
 	TextChatService.MessageReceived:Connect(function(msg)
 		local status = msg.Status
@@ -2175,7 +2247,3 @@ if ChatEnabled then
 		end
 	end)
 end
-
--- ═══════════════════════════════════════════════════════════════
--- (Welcome/"Modern HUD Active" popup removed per request)
--- ═══════════════════════════════════════════════════════════════
